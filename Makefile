@@ -79,8 +79,5 @@ reset-db:
 	docker compose down db --volumes
 	docker compose up -d db
 
-docs-serve:
-	poetry run mkdocs serve
-
 docs-build:
-	poetry run mkdocs build
+	python3 -m poetry run sphinx-build -M html docs build
