@@ -19,7 +19,7 @@ def test_get_health(app_client):
 
 @pytest.mark.asyncio
 async def test_post_file_upload(
-    s3_client, app_client, elasticsearch_storage_handler, file_pdf_path
+    s3_client, file_app_client, elasticsearch_storage_handler, file_pdf_path
 ):
     """
     Given a new file
@@ -45,8 +45,8 @@ async def test_post_file_upload(
         )
 
         async with TestRedisBroker(router.broker):
-            response = app_client.post(
-                "/file",
+            response = file_app_client.post(
+                "/",
                 params={
                     "name": "filename",
                     "type": ".pdf",
@@ -56,19 +56,19 @@ async def test_post_file_upload(
     assert response.status_code == 200
 
 
-def test_get_file(app_client, stored_file):
+def test_get_file(file_app_client, stored_file):
     """
     Given a previously saved file
     When I GET it from /file/uuid
     I Expect to receive it
     """
 
-    response = app_client.get(f"/file/{stored_file.uuid}")
+    response = file_app_client.get(f"/{stored_file.uuid}")
     assert response.status_code == 200
 
 
 def test_delete_file(
-    s3_client, app_client, elasticsearch_storage_handler, chunked_file
+    s3_client, file_app_client, elasticsearch_storage_handler, chunked_file
 ):
     """
     Given a previously saved file
@@ -82,7 +82,7 @@ def test_delete_file(
     )
     assert elasticsearch_storage_handler.get_file_chunks(chunked_file.uuid)
 
-    response = app_client.delete(f"/file/{chunked_file.uuid}")
+    response = file_app_client.delete(f"/{chunked_file.uuid}")
     assert response.status_code == 200
 
     elasticsearch_storage_handler.refresh()
@@ -144,7 +144,7 @@ def test_embed_sentences(client):
     assert response.status_code == 200
 
 
-def test_get_file_chunks(client, chunked_file):
-    response = client.get(f"/file/{chunked_file.uuid}/chunks")
+def test_get_file_chunks(file_app_client, chunked_file):
+    response = file_app_client.get(f"/{chunked_file.uuid}/chunks")
     assert response.status_code == 200
     assert len(response.json()) == 5

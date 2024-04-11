@@ -6,8 +6,8 @@ from elasticsearch import Elasticsearch
 from fastapi.testclient import TestClient
 from sentence_transformers import SentenceTransformer
 
-from core_api.src.app import app as application
-from core_api.src.app import env
+from core_api.src.app import app as application, env
+from core_api.src.file_app import file_app
 from redbox.models import Chunk, File
 from redbox.storage import ElasticsearchStorageHandler
 
@@ -39,6 +39,11 @@ def es_client() -> YieldFixture[Elasticsearch]:
 @pytest.fixture
 def app_client():
     yield TestClient(application)
+
+
+@pytest.fixture
+def file_app_client():
+    yield TestClient(file_app)
 
 
 @pytest.fixture
