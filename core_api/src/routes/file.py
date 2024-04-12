@@ -2,7 +2,7 @@ import logging
 from uuid import UUID
 
 from fastapi import FastAPI, HTTPException
-from faststream.redis.fastapi import RedisRouter
+from faststream.redis.fastapi import RedisRouter, RedisBroker
 from pydantic import AnyHttpUrl
 
 from redbox.models import Chunk, File, FileStatus, Settings
@@ -26,12 +26,17 @@ s3 = env.s3_client()
 es = env.elasticsearch_client()
 storage_handler = ElasticsearchStorageHandler(es_client=es, root_index="redbox-data")
 
-file_app = FastAPI()
+router = RedisRouter(url=env.redis_url)
+router.broker.connect()
+
+publisher = router.publisher(env.ingest_queue_name)
+
+file_app = FastAPI(lifespan=router.lifespan_context,)
+file_app.include_router(router)
 
 
 # === Queues ===
-router = RedisRouter(url=env.redis_url)
-publisher = router.publisher(env.ingest_queue_name)
+# router = RedisRouter(url=env.redis_url)
 
 
 @file_app.post("/", tags=["file"])
@@ -56,6 +61,8 @@ async def create_upload_file(name: str, type: str, location: AnyHttpUrl) -> UUID
     storage_handler.write_item(file)
 
     log.info(f"publishing {file.uuid}")
+
+
     await publisher.publish(file)
 
     return file.uuid

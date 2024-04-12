@@ -2,7 +2,6 @@ from datetime import datetime
 
 from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
-from faststream.redis.fastapi import RedisRouter
 
 from core_api.src.routes.file import file_app
 from redbox.model_db import SentenceTransformerDB
@@ -16,7 +15,6 @@ model_db = SentenceTransformerDB(env.embedding_model)
 
 # === Queues ===
 
-router = RedisRouter(url=env.redis_url)
 
 
 # === API Setup ===
@@ -36,10 +34,9 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc",
     openapi_url="/openapi.json",
-    lifespan=router.lifespan_context,
+    # lifespan=router.lifespan_context,
 )
 
-app.include_router(router)
 
 # === API Routes ===
 
