@@ -22,7 +22,7 @@ For a quick start, you can use GitHub Codespaces to run the project in a cloud-b
 
 # Development
 
-You will need to install `poppler` and `tesseract` to run the `ingester`
+You will need to install `poppler` and `tesseract` to run the `worker`
 - `brew install poppler`
 - `brew install tesseract`
 
@@ -53,14 +53,9 @@ redbox-copilot/
 │  ├── tests/
 │  ├── manage.py
 │  └── Dockerfile
-├── embedder
+├── worker
 │  ├── src/
-│  │  └── worker.py
-│  ├── tests/
-│  └── Dockerfile
-├── ingester
-│  ├── src/
-│  │  └── worker.py
+│  │  └── app.py
 │  ├── tests/
 │  └── Dockerfile
 ├── redbox/
@@ -87,6 +82,32 @@ We welcome contributions to this project. Please see the [CONTRIBUTING.md](./CON
 This project is licensed under the MIT License - see the [LICENSE](./LICENSE) file for details.
 
 # Security
+
+> [!IMPORTANT]
+> The core-api is the http-gateway to the backend. Currently, this is unsecured, you should only run this on
+> a private network. 
+
+However:
+* We have taken care to ensure that the backend is as stateless as possible, i.e. it only stores text chunks and 
+  embeddings. All data is associated with a user, and a user can access their own data. 
+* The only user data stored is the user-uuid, and no chat history is stored.
+* We are considering making the core-api secure. To this end the user-uuid is passed to the core-api as a JWT.
+  Currently no attempt is made to verify the JWT, but in the future we may do so, e.g. via Cognito or similar
+
+You can generate your JWT using the following snippet. Note that you whilst you can use a more secure key than an
+empty string this is currently not verified.  
+
+```python
+from jose import jwt
+import requests
+
+my_uuid = "a93a8f40-f261-4f12-869a-2cea3f3f0d71"
+token = jwt.encode({"user_uuid": my_uuid}, key="")
+
+requests.get(..., headers={"Authorization": f"Bearer {token}"})
+```
+
+You can find a link to a notebook on how to generate a JWT in the [here](./notebooks/token_generation.ipynb).
 
 If you discover a security vulnerability within this project, please follow our [Security Policy](./SECURITY.md).
 
@@ -149,3 +170,23 @@ The govuk assets are versioned in the `npm` package. On initial app setup you wi
 
 We’ll revisit this process when we deploy the app.
 
+
+
+## How to deploy
+
+checkout the `main` branch of the following repos:
+* https://github.com/i-dot-ai/redbox-copilot
+* https://github.com/i-dot-ai/i-ai-core-infrastructure/
+* https://github.com/i-dot-ai/redbox-copilot-infra-config
+
+
+If, and only if, you want to deploy something other than HEAD then replace `var.image_tag` in `infrastructure/aws/ecs.tf` with the hash of the build you want deployed.
+
+
+Now run the commands below remembering to replace ENVIRONMENT with `dev`, `preprod` or `prod`
+
+```commandline
+cd redbox-copilot
+make tf_init
+make tf_apply env=<ENVIRONMENT>
+```

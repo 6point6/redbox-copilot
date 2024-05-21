@@ -1,4 +1,5 @@
 from enum import Enum
+from typing import Optional
 
 from sentence_transformers import SentenceTransformer
 
@@ -32,43 +33,25 @@ class ContentType(str, Enum):
     XLSX = ".xlsx"
 
 
-class FileChunker:
-    """A class to wrap unstructured and generate compliant chunks from files"""
+def chunk_file(
+    file: File,
+    embedding_model: Optional[SentenceTransformer] = None,
+) -> list[Chunk]:
+    """
+    Args:
+        file (File): The file to read, analyse layout and chunk.
+        embedding_model (SentenceTransformer): The model to use
+            to merge small semantically similar chunks, if not
+            specified, not clustering will happen.
+    Raises:
+        ValueError: Will raise when a file is not supported.
 
-    def __init__(self, embedding_model: SentenceTransformer = None):
-        self.supported_file_types = [content_type.value for content_type in ContentType]
-        self.embedding_model = embedding_model
+    Returns:
+        List[Chunk]: The chunks generated from the given file.
+    """
+    chunks = other_chunker(file)
 
-    def chunk_file(
-        self,
-        file: File,
-        chunk_clustering: bool = True,
-    ) -> list[Chunk]:
-        """_summary_
+    if embedding_model is not None:
+        chunks = cluster_chunks(chunks, embedding_model=embedding_model)
 
-        Args:
-            file (File): The file to read, analyse layout and chunk.
-            file_url (str): The authenticated url of the file to fetch, analyse layout and chunk.
-            chunk_clustering (bool): Whether to merge small semantically similar chunks.
-                Defaults to True.
-        Raises:
-            ValueError: Will raise when a file is not supported.
-
-        Returns:
-            List[Chunk]: The chunks generated from the given file.
-        """
-        chunks = other_chunker(file)
-
-        if chunk_clustering:
-            chunks = cluster_chunks(chunks, embedding_model=self.embedding_model)
-
-        # Ensure page numbers are a list for schema compliance
-        for chunk in chunks:
-            if "page_number" in chunk.metadata:
-                if isinstance(chunk.metadata["page_number"], int):
-                    chunk.metadata["page_numbers"] = [chunk.metadata["page_number"]]
-                elif isinstance(chunk.metadata["page_number"], list):
-                    chunk.metadata["page_numbers"] = chunk.metadata["page_number"]
-                del chunk.metadata["page_number"]
-
-        return chunks
+    return chunks

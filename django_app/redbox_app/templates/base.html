@@ -14,9 +14,15 @@
   <link rel="manifest" href="{{static("govuk-assets/manifest.json")}}">
 
   <meta name="robots" content="noindex, nofollow">
-  {% compress css %}
-  <link rel="stylesheet" type="text/x-scss" href="{{static('style.scss')}}" />
-  {% endcompress %}
+  {% if COMPRESSION_ENABLED %}
+    {% compress css %}
+      <link rel="stylesheet" type="text/x-scss" href="{{static('style.scss')}}" />
+    {% endcompress %}
+  {% else %}
+    <link rel="stylesheet" type="text/css" href="{{static('style.css')}}" />
+  {% endif %}
+
+  <script type="module" src="{{static('js/libs/govuk-frontend.min.js')}}"></script>
 
 </head>
 
@@ -44,33 +50,64 @@
         </a>
       </div>
       <div class="govuk-header__content">
-        <a href="/" class="govuk-header__link govuk-header__service-name">
-          Redbox Copilot
-        </a>
+        <div class="iai-header__service-name-container">
+          <a href="{{url('homepage')}}" class="govuk-header__link govuk-header__service-name">
+            Redbox Copilot
+          </a>
+          <strong class="govuk-tag govuk-phase-banner__content__tag">
+            Beta
+          </strong>
+        </div>
+        <nav aria-label="Menu" class="govuk-header__navigation">
+          <button type="button" class="govuk-header__menu-button govuk-js-header-toggle" aria-controls="navigation" hidden>
+            Menu
+          </button>
+
+          {% if request.user.is_authenticated %}
+            {% set menu_items = [
+              {"text": "Documents", "url": "documents"},
+              {"text": "Sessions", "url": "sessions"},
+              {"text": "Sign out", "url": "signed-out"}
+            ] %}
+          {% else %}
+            {% set menu_items = [
+              {"text": "Sign in", "url": "sign-in"}
+            ] %}
+          {% endif %}
+          <ul id="navigation" class="govuk-header__navigation-list">
+            {% for menu_item in menu_items %}
+              <li class="govuk-header__navigation-item {% if pageTitle == menu_item.text %}govuk-header__navigation-item--active{% endif %}">
+                <a class="govuk-header__link" href="{{ url(menu_item.url) }}">{{ menu_item.text }}</a>
+              </li>
+            {% endfor %}
+          </ul>
+        </nav>
       </div>
     </div>
   </header>
 
 
+  {# Phase banner #}
+  {#
   <div class="govuk-width-container">
-
-    {# Phase banner #}
     <div class="govuk-phase-banner">
       <p class="govuk-phase-banner__content">
         <strong class="govuk-tag govuk-phase-banner__content__tag">
           Beta
         </strong>
         <span class="govuk-phase-banner__text">
-          This is a new service – your <a class="govuk-link" href="#feedback">feedback</a> will help us to improve it.
+          This is a new service – your <a class="govuk-link" href="https://www.smartsurvey.co.uk/s/EOWJ04/">feedback</a> will help us to improve it.
         </span>
       </p>
     </div>
-
-    <main class="govuk-main-wrapper" id="main-content" role="main">
-      {% block content %}
-      {% endblock %}
-    </main>
   </div>
+  #}
+
+  <main class="govuk-main-wrapper" id="main-content" role="main">
+    {% block content %}
+    {% endblock %}
+  </main>
+
 
   <footer class="govuk-footer" role="contentinfo">
     <div class="govuk-width-container">
@@ -94,6 +131,9 @@
               </a>
             </li>
           </ul>
+          <div class="govuk-footer__meta-custom">
+            This is a new service – your <a class="govuk-link" href="#feedback">feedback</a> will help us to improve it.
+          </div>
           <svg
             aria-hidden="true"
             focusable="false"
@@ -115,10 +155,8 @@
           </span>
         </div>
         <div class="govuk-footer__meta-item">
-          <a
-            class="govuk-footer__link govuk-footer__copyright-logo"
-            href="https://www.nationalarchives.gov.uk/information-management/re-using-public-sector-information/uk-government-licensing-framework/crown-copyright/">
-            © Crown copyright
+          <a class="govuk-footer__link govuk-footer__copyright-logo" href="https://ai.gov.uk">
+            <img src="{{ static('images/iai-logo.svg') }}" alt="Incubator for Artificial Intelligence" loading="lazy"/>
           </a>
         </div>
       </div>

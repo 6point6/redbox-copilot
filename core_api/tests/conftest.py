@@ -1,11 +1,12 @@
 import os
 from typing import Generator, TypeVar
+from uuid import UUID, uuid4
 
 import pytest
 from botocore.exceptions import ClientError
 from elasticsearch import Elasticsearch
 from fastapi.testclient import TestClient
-from sentence_transformers import SentenceTransformer
+from jose import jwt
 
 from core_api.src.app import app as application
 from core_api.src.app import env
@@ -15,16 +16,6 @@ from redbox.storage import ElasticsearchStorageHandler
 T = TypeVar("T")
 
 YieldFixture = Generator[T, None, None]
-
-
-@pytest.fixture(autouse=True)
-def small_model():
-    SentenceTransformer(env.embedding_model, cache_folder="./models")
-
-
-@pytest.fixture
-def client():
-    yield TestClient(application)
 
 
 @pytest.fixture
@@ -48,8 +39,19 @@ def es_client() -> YieldFixture[Elasticsearch]:
 
 
 @pytest.fixture
-def app_client():
+def app_client() -> YieldFixture[TestClient]:
     yield TestClient(application)
+
+
+@pytest.fixture
+def alice() -> YieldFixture[UUID]:
+    yield uuid4()
+
+
+@pytest.fixture
+def headers(alice):
+    bearer_token = jwt.encode({"user_uuid": str(alice)}, key="nvjkernd")
+    yield {"Authorization": f"Bearer {bearer_token}"}
 
 
 @pytest.fixture
@@ -58,7 +60,7 @@ def elasticsearch_storage_handler(es_client):
 
 
 @pytest.fixture
-def file(s3_client, file_pdf_path) -> YieldFixture[File]:
+def file(s3_client, file_pdf_path, alice) -> YieldFixture[File]:
     file_name = os.path.basename(file_pdf_path)
     file_type = f'.{file_name.split(".")[-1]}'
 
@@ -70,7 +72,7 @@ def file(s3_client, file_pdf_path) -> YieldFixture[File]:
             Tagging=f"file_type={file_type}",
         )
 
-    file_record = File(key=file_name, bucket=env.bucket_name)
+    file_record = File(key=file_name, bucket=env.bucket_name, creator_user_uuid=alice)
 
     yield file_record
 
@@ -85,7 +87,12 @@ def stored_file(elasticsearch_storage_handler, file) -> YieldFixture[File]:
 @pytest.fixture
 def chunked_file(elasticsearch_storage_handler, stored_file) -> YieldFixture[File]:
     for i in range(5):
-        chunk = Chunk(text="hello", index=i, parent_file_uuid=stored_file.uuid, metadata={})
+        chunk = Chunk(
+            text="hello",
+            index=i,
+            parent_file_uuid=stored_file.uuid,
+            creator_user_uuid=stored_file.creator_user_uuid,
+        )
         elasticsearch_storage_handler.write_item(chunk)
     elasticsearch_storage_handler.refresh()
     yield stored_file

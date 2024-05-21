@@ -15,6 +15,7 @@ class ElasticLocalSettings(BaseModel):
     user: str = "elastic"
     version: str = "8.11.0"
     password: str = "redboxpass"
+    subscription_level: str = "basic"
 
 
 class ElasticCloudSettings(BaseModel):
@@ -22,6 +23,7 @@ class ElasticCloudSettings(BaseModel):
 
     api_key: str
     cloud_id: str
+    subscription_level: str = "basic"
 
 
 class Settings(BaseSettings):
@@ -29,6 +31,8 @@ class Settings(BaseSettings):
 
     anthropic_api_key: Optional[str] = None
     openai_api_key: Optional[str] = None
+
+    partition_strategy: Literal["auto", "fast", "ocr_only", "hi_res"] = "fast"
 
     elastic: ElasticCloudSettings | ElasticLocalSettings = ElasticLocalSettings()
 
@@ -41,15 +45,10 @@ class Settings(BaseSettings):
 
     minio_host: str = "minio"
     minio_port: int = 9000
-    minio_access_key: str = "minioadmin"
-    minio_secret_key: str = "minioadmin"
+    aws_access_key: Optional[str] = None
+    aws_secret_key: Optional[str] = None
 
-    aws_access_key_id: Optional[str] = None
-    aws_secret_access_key: Optional[str] = None
     aws_region: str = "eu-west-2"
-
-    object_store: str = "minio"
-
     bucket_name: str = "redbox-storage-dev"
     embedding_model: str = "all-mpnet-base-v2"
 
@@ -59,20 +58,30 @@ class Settings(BaseSettings):
     redis_host: str = "redis"
     redis_port: int = 6379
 
+    object_store: str = "minio"
+
     dev_mode: bool = False
     django_settings_module: str = "redbox_app.settings"
     debug: bool = True
     django_secret_key: str
-    environment: Literal["LOCAL"] = "LOCAL"
+    django_log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "WARNING"
+    environment: Literal["LOCAL", "DEV", "PREPROD", "PROD"] = "LOCAL"
     postgres_user: str = "redbox-core"
     postgres_db: str = "redbox-core"
     postgres_password: str
     postgres_host: str = "db"
     contact_email: str = "test@example.com"
-    core_api_host: str = "http://core-api"
+    core_api_host: str = "core-api"
     core_api_port: int = 5002
+    email_backend_type: str = "CONSOLE"
+    gov_notify_api_key: Optional[str] = None
+    from_email: Optional[str] = None
+    email_file_path: str = "/app/mail"
+    govuk_notify_plain_email_template_id: str = "example-id"
+    use_streaming: bool = False
+    compression_enabled: bool = True
 
-    model_config = SettingsConfigDict(env_file=".env", env_nested_delimiter="__")
+    model_config = SettingsConfigDict(env_file=".env", env_nested_delimiter="__", extra="allow")
 
     def elasticsearch_client(self) -> Elasticsearch:
         if isinstance(self.elastic, ElasticLocalSettings):
@@ -95,16 +104,16 @@ class Settings(BaseSettings):
         if self.object_store == "minio":
             client = boto3.client(
                 "s3",
-                aws_access_key_id=self.minio_access_key,
-                aws_secret_access_key=self.minio_secret_key,
+                aws_access_key_id=self.aws_access_key or "",
+                aws_secret_access_key=self.aws_secret_key or "",
                 endpoint_url=f"http://{self.minio_host}:{self.minio_port}",
             )
 
         elif self.object_store == "s3":
             client = boto3.client(
                 "s3",
-                aws_access_key_id=self.aws_access_key_id,
-                aws_secret_access_key=self.aws_secret_access_key,
+                aws_access_key_id=self.aws_access_key,
+                aws_secret_access_key=self.aws_secret_key,
                 region_name=self.aws_region,
             )
         elif self.object_store == "moto":
@@ -115,8 +124,8 @@ class Settings(BaseSettings):
 
             client = boto3.client(
                 "s3",
-                aws_access_key_id=self.aws_access_key_id,
-                aws_secret_access_key=self.aws_secret_access_key,
+                aws_access_key_id=self.aws_access_key,
+                aws_secret_access_key=self.aws_secret_key,
                 region_name=self.aws_region,
             )
         else:

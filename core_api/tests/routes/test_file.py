@@ -1,4 +1,6 @@
+import json
 import os
+from http import HTTPStatus
 
 import pytest
 from elasticsearch import NotFoundError
@@ -8,7 +10,7 @@ from core_api.src.routes.file import env, router
 
 
 @pytest.mark.asyncio
-async def test_post_file_upload(s3_client, app_client, elasticsearch_storage_handler, file_pdf_path):
+async def test_post_file_upload(s3_client, app_client, elasticsearch_storage_handler, file_pdf_path, headers):
     """
     Given a new file
     When I POST it to /file
@@ -32,22 +34,47 @@ async def test_post_file_upload(s3_client, app_client, elasticsearch_storage_han
                     "key": file_key,
                     "bucket": env.bucket_name,
                 },
+                headers=headers,
             )
-    assert response.status_code == 200
+    assert response.status_code == HTTPStatus.CREATED
 
 
-def test_get_file(app_client, stored_file):
+def test_list_files(app_client, stored_file, headers):
+    """
+    Given a previously saved file
+    When I GET all files from /file
+    I Expect the response to contain this file
+    """
+    response = app_client.get("/file", headers=headers)
+    assert response.status_code == HTTPStatus.OK
+
+    file_list = json.loads(response.content.decode("utf-8"))
+    assert len(file_list) > 0
+
+    assert str(stored_file.uuid) in [file["uuid"] for file in file_list]
+
+
+def test_get_file(app_client, stored_file, headers):
     """
     Given a previously saved file
     When I GET it from /file/uuid
     I Expect to receive it
     """
+    response = app_client.get(f"/file/{stored_file.uuid}", headers=headers)
+    assert response.status_code == HTTPStatus.OK
 
-    response = app_client.get(f"/file/{stored_file.uuid}")
-    assert response.status_code == 200
+
+def test_get_missing_file(app_client, headers):
+    """
+    Given a nonexistent file
+    When I GET it from /file/uuid
+    I Expect to receive a 404 error
+    """
+    response = app_client.get("/file/ffffffff-ffff-ffff-ffff-ffffffffffff", headers=headers)
+    assert response.status_code == HTTPStatus.NOT_FOUND
 
 
-def test_delete_file(s3_client, app_client, elasticsearch_storage_handler, chunked_file):
+def test_delete_file(s3_client, app_client, elasticsearch_storage_handler, chunked_file, headers):
     """
     Given a previously saved file
     When I DELETE it to /file
@@ -56,24 +83,59 @@ def test_delete_file(s3_client, app_client, elasticsearch_storage_handler, chunk
     # check assets exist
     assert s3_client.get_object(Bucket=env.bucket_name, Key=chunked_file.key)
     assert elasticsearch_storage_handler.read_item(item_uuid=chunked_file.uuid, model_type="file")
-    assert elasticsearch_storage_handler.get_file_chunks(chunked_file.uuid)
+    assert elasticsearch_storage_handler.get_file_chunks(chunked_file.uuid, chunked_file.creator_user_uuid)
 
-    response = app_client.delete(f"/file/{chunked_file.uuid}")
-    assert response.status_code == 200
+    response = app_client.delete(f"/file/{chunked_file.uuid}", headers=headers)
+    assert response.status_code == HTTPStatus.OK
 
     elasticsearch_storage_handler.refresh()
 
     # check assets dont exist
-    with pytest.raises(Exception):
+    with pytest.raises(s3_client.exceptions.NoSuchKey):
         s3_client.get_object(Bucket=env.bucket_name, Key=chunked_file.key)
 
     with pytest.raises(NotFoundError):
         elasticsearch_storage_handler.read_item(item_uuid=chunked_file.uuid, model_type="file")
 
-    assert not elasticsearch_storage_handler.get_file_chunks(chunked_file.uuid)
+    assert not elasticsearch_storage_handler.get_file_chunks(chunked_file.uuid, chunked_file.creator_user_uuid)
 
 
-def test_get_file_chunks(client, chunked_file):
-    response = client.get(f"/file/{chunked_file.uuid}/chunks")
-    assert response.status_code == 200
+def test_delete_missing_file(app_client, headers):
+    """
+    Given a nonexistent file
+    When I DELETE it to /file
+    I Expect to receive a 404 error
+    """
+    response = app_client.delete("/file/ffffffff-ffff-ffff-ffff-ffffffffffff", headers=headers)
+    assert response.status_code == HTTPStatus.NOT_FOUND
+
+
+def test_get_file_chunks(app_client, chunked_file, headers):
+    """
+    Given a previously chunked file
+    When I GET it from /file/uuid/chunks
+    I Expect to receive the chunks
+    """
+    response = app_client.get(f"/file/{chunked_file.uuid}/chunks", headers=headers)
+    assert response.status_code == HTTPStatus.OK
     assert len(response.json()) == 5
+
+
+def test_get_missing_file_chunks(app_client, headers):
+    """
+    Given a nonexistent file
+    When I GET it from /file/uuid/chunks
+    I Expect to receive a 404 error
+    """
+    response = app_client.get("/file/ffffffff-ffff-ffff-ffff-ffffffffffff/chunks", headers=headers)
+    assert response.status_code == HTTPStatus.NOT_FOUND
+
+
+def test_get_missing_file_status(app_client, headers):
+    """
+    Given a nonexistent file
+    When I GET it from /file/uuid/status
+    I Expect to receive a 404 error
+    """
+    response = app_client.get("/file/ffffffff-ffff-ffff-ffff-ffffffffffff/status", headers=headers)
+    assert response.status_code == HTTPStatus.NOT_FOUND

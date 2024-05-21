@@ -1,11 +1,8 @@
 locals {
   repos = [
     "core-api",
-    "db",
     "django-app",
-    "embedder",
-    "ingester",
-    "redbox",
+    "worker",
   ]
 }
 

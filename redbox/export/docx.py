@@ -1,3 +1,4 @@
+import logging
 import tempfile
 from typing import Optional
 
@@ -9,6 +10,9 @@ from unstructured.partition.html import partition_html
 
 from redbox import __version__ as redbox_version
 from redbox.models import File, SpotlightComplete
+
+logging.basicConfig(level=logging.INFO)
+log = logging.getLogger()
 
 
 def lookup_indentedness(raw: str, line_str_to_match: str):
@@ -56,7 +60,7 @@ def spotlight_complete_to_docx(
 
     document.add_heading("Summarised Files", level=1)
     for file in files:
-        document.add_paragraph(file.name, style="List Bullet")
+        document.add_paragraph(file.key, style="List Bullet")
 
     for task in spotlight_complete.tasks:
         document.add_heading(task.title, level=1)
@@ -64,12 +68,12 @@ def spotlight_complete_to_docx(
         uuid_to_file_map = {f.uuid: f for f in files}
 
         raw = task.raw
-        for uuid in uuid_to_file_map.keys():
-            raw = raw.replace(f"<Doc{uuid}>", f"{uuid_to_file_map[uuid].name}")
+        for uuid in uuid_to_file_map:
+            raw = raw.replace(f"<Doc{uuid}>", f"{uuid_to_file_map[uuid].key}")
             raw = raw.replace(f"</Doc{uuid}>", "")
 
-            raw = raw.replace(f"Doc{uuid}", f"{uuid_to_file_map[uuid].name}")
-            raw = raw.replace(f"{uuid}", f"{uuid_to_file_map[uuid].name}")
+            raw = raw.replace(f"Doc{uuid}", f"{uuid_to_file_map[uuid].key}")
+            raw = raw.replace(f"{uuid}", f"{uuid_to_file_map[uuid].key}")
 
         html_raw = markdown.markdown(task.raw)
         temp_file = tempfile.NamedTemporaryFile(delete=True, suffix=".html")
@@ -95,7 +99,7 @@ def spotlight_complete_to_docx(
             elif element_dict["type"] == "Title":
                 document.add_heading(element_dict["text"], level=2)
             else:
-                print(element_dict["type"], element_dict["text"])
+                log.debug(element_dict["type"], element_dict["text"])
 
         document.add_page_break()
 

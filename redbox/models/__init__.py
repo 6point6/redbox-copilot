@@ -1,9 +1,14 @@
-from redbox.models.chat import ChatMessage
+from redbox.models.chat import ChatMessage, ChatRequest, ChatResponse
 from redbox.models.embedding import (
+    EmbeddingModelInfo,
     EmbeddingResponse,
     EmbedQueueItem,
-    ModelInfo,
     StatusResponse,
+)
+from redbox.models.errors import (
+    APIError404,
+    APIErrorDetail,
+    APIErrorResponse,
 )
 from redbox.models.file import (
     Chunk,
@@ -24,8 +29,11 @@ from redbox.models.spotlight import (
 __all__ = [
     "ChatMessage",
     "ChatPersona",
+    "ChatResponse",
+    "ChatRequest",
     "Chunk",
     "ChunkStatus",
+    "EmbeddingModelInfo",
     "File",
     "FileStatus",
     "Spotlight",
@@ -33,9 +41,11 @@ __all__ = [
     "SpotlightTask",
     "SpotlightTaskComplete",
     "Settings",
-    "ModelInfo",
     "EmbeddingResponse",
     "EmbedQueueItem",
     "StatusResponse",
     "ProcessingStatusEnum",
+    "APIErrorResponse",
+    "APIErrorDetail",
+    "APIError404",
 ]

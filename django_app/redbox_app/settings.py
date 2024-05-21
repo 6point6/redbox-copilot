@@ -5,14 +5,14 @@ import socket
 from pathlib import Path
 
 import environ
-import sentry_sdk
-from sentry_sdk.integrations.django import DjangoIntegration
+from dotenv import load_dotenv
+from storages.backends import s3boto3
 
 from .hosting_environment import HostingEnvironment
 
-env = environ.Env()
+load_dotenv()
 
-AWS_REGION = env.str("AWS_REGION")
+env = environ.Env()
 
 SECRET_KEY = env.str("DJANGO_SECRET_KEY")
 ENVIRONMENT = env.str("ENVIRONMENT")
@@ -22,20 +22,20 @@ DEBUG = env.bool("DEBUG")
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-COMPRESS_ENABLED = True
+COMPRESSION_ENABLED = env.bool("COMPRESSION_ENABLED")
+
 COMPRESS_PRECOMPILERS = (("text/x-scss", "django_libsass.SassCompiler"),)
 
 STATIC_URL = "static/"
-STATIC_ROOT = "django_app/frontend/"
+STATIC_ROOT = "staticfiles/"
 STATICFILES_DIRS = [
-    (
-        "govuk-assets",
-        BASE_DIR / "frontend/node_modules/govuk-frontend/dist/govuk/assets",
-    )
+    os.path.join(BASE_DIR, "static/"),
+    os.path.join(BASE_DIR, "frontend/"),
 ]
 STATICFILES_FINDERS = [
     "compressor.finders.CompressorFinder",
     "django.contrib.staticfiles.finders.FileSystemFinder",
+    "django.contrib.staticfiles.finders.AppDirectoriesFinder",
 ]
 
 
@@ -43,6 +43,7 @@ SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 # Application definition
 INSTALLED_APPS = [
+    "daphne",
     "redbox_app.redbox_core",
     "allauth",
     "allauth.account",
@@ -56,16 +57,12 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "single_session",
     "storages",
-    "health_check",
-    "health_check.db",
-    "health_check.contrib.migrations",
-    "health_check.cache",
     "compressor",
+    "magic_link",
 ]
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
-    "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -86,11 +83,16 @@ TEMPLATES = [
             BASE_DIR / "redbox_app" / "templates",
             BASE_DIR / "redbox_app" / "templates" / "auth",
         ],
-        "OPTIONS": {"environment": "redbox_app.jinja2.environment"},
+        "OPTIONS": {
+            "environment": "redbox_app.jinja2.environment",
+            "context_processors": [
+                "redbox_app.context_processors.compression_enabled",
+            ],
+        },
     },
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [],
+        "DIRS": [os.path.join(BASE_DIR, "templates")],
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
@@ -104,6 +106,7 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = "redbox_app.wsgi.application"
+ASGI_APPLICATION = "redbox_app.asgi.application"
 
 AUTHENTICATION_BACKENDS = [
     "django.contrib.auth.backends.ModelBackend",
@@ -125,16 +128,8 @@ AUTH_PASSWORD_VALIDATORS = [
     {
         "NAME": "django.contrib.auth.password_validation.NumericPasswordValidator",
     },
-    {
-        "NAME": "redbox_app.custom_password_validators.SpecialCharacterValidator",
-    },
-    {
-        "NAME": "redbox_app.custom_password_validators.LowercaseUppercaseValidator",
-    },
-    {
-        "NAME": "redbox_app.custom_password_validators.BusinessPhraseSimilarityValidator",
-    },
 ]
+
 
 LANGUAGE_CODE = "en-GB"
 TIME_ZONE = "UTC"
@@ -145,6 +140,7 @@ SITE_ID = 1
 AUTH_USER_MODEL = "redbox_core.User"
 ACCOUNT_EMAIL_VERIFICATION = "none"
 LOGIN_REDIRECT_URL = "homepage"
+LOGIN_URL = "sign-in"
 
 # CSP settings https://content-security-policy.com/
 # https://django-csp.readthedocs.io/
@@ -190,53 +186,58 @@ SESSION_COOKIE_AGE = 60 * 60 * 24
 SESSION_COOKIE_SAMESITE = "Strict"
 SESSION_ENGINE = "django.contrib.sessions.backends.db"
 
+LOG_ROOT = "."
+LOG_HANDLER = "console"
+BUCKET_NAME = env.str("BUCKET_NAME")
+AWS_S3_REGION_NAME = env.str("AWS_REGION")
+APPEND_SLASH = True
 
-if HostingEnvironment.is_beanstalk():
+#  Property added to each S3 file to make them downloadable by default
+AWS_S3_OBJECT_PARAMETERS = {"ContentDisposition": "attachment"}
+AWS_STORAGE_BUCKET_NAME = BUCKET_NAME  # this duplication is required for django-storage
+OBJECT_STORE = env.str("OBJECT_STORE")
+AWS_S3_FILE_OVERWRITE = False  # allows users to have duplicate file names
+
+if HostingEnvironment.is_local():
+    AWS_S3_SECRET_ACCESS_KEY = env.str("AWS_SECRET_KEY")
+    AWS_ACCESS_KEY_ID = env.str("AWS_ACCESS_KEY")
+    MINIO_HOST = env.str("MINIO_HOST")
+    MINIO_PORT = env.str("MINIO_PORT")
+    MINIO_ENDPOINT = f"http://{MINIO_HOST}:{MINIO_PORT}"
+    AWS_S3_ENDPOINT_URL = MINIO_ENDPOINT
+
+    STORAGES = {
+        "default": {
+            "BACKEND": s3boto3.S3Boto3Storage,
+        },
+        "staticfiles": {
+            "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+        },
+    }
+
+    ALLOWED_HOSTS = [
+        "localhost",
+        "127.0.0.1",
+        "0.0.0.0",  # noqa S104
+    ]  # nosec B104 - don't do this on server!
+else:
+    STORAGES = {
+        "default": {
+            "BACKEND": s3boto3.S3Boto3Storage,
+        },
+        "staticfiles": {
+            "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+        },
+    }
+
     LOCALHOST = socket.gethostbyname(socket.gethostname())
     ALLOWED_HOSTS = [
         LOCALHOST,
+        "redbox-dev.ai.cabinetoffice.gov.uk",
+        "redbox-preprod.ai.cabinetoffice.gov.uk",
+        "redbox.ai.cabinetoffice.gov.uk",
     ]
 
-    for key, value in HostingEnvironment.get_beanstalk_environ_vars().items():
-        env(key, default=value)
-
-    STATICFILES_STORAGE = "storages.backends.s3boto3.S3Boto3Storage"
-    DEFAULT_FILE_STORAGE = "storages.backends.s3boto3.S3Boto3Storage"
-    OBJECT_STORE = "s3"
-    AWS_STORAGE_BUCKET_NAME = env.str("AWS_STORAGE_BUCKET_NAME")
-    AWS_S3_REGION_NAME = env.str("AWS_S3_REGION_NAME")
-    INSTALLED_APPS += ["health_check.contrib.s3boto3_storage"]
-    # https://docs.aws.amazon.com/elasticbeanstalk/latest/dg/using-features.logging.html
-    LOG_ROOT = "/opt/python/log/"
-    LOG_HANDLER = "file"
-    SENTRY_DSN = env.str("SENTRY_DSN")
-    SENTRY_ENVIRONMENT = env.str("SENTRY_ENVIRONMENT")
-    sentry_sdk.init(
-        dsn=SENTRY_DSN,
-        integrations=[
-            DjangoIntegration(),
-        ],
-        environment=SENTRY_ENVIRONMENT,
-        send_default_pii=False,
-        traces_sample_rate=1.0,
-        profiles_sample_rate=0.0,
-    )
-else:
-    ALLOWED_HOSTS = ["localhost", "127.0.0.1"]
-    DEFAULT_FILE_STORAGE = "storages.backends.s3boto3.S3Boto3Storage"
-    LOG_ROOT = "."
-    LOG_HANDLER = "console"
-
-if HostingEnvironment.is_local():
-    # For Docker to work locally
-    ALLOWED_HOSTS.append("0.0.0.0")  # nosec B104 - don't do this on server!
-    OBJECT_STORE = "minio"
-    MINIO_ACCESS_KEY = env.str("MINIO_ACCESS_KEY")
-    MINIO_SECRET_KEY = env.str("MINIO_SECRET_KEY")
-    MINIO_HOST = env.str("MINIO_HOST")
-    MINIO_PORT = env.str("MINIO_PORT")
-    BUCKET_NAME = env.str("BUCKET_NAME")
-else:
     # https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Strict-Transport-Security
     # Mozilla guidance max-age 2 years
     SECURE_HSTS_SECONDS = 2 * 365 * 24 * 60 * 60
@@ -255,26 +256,68 @@ DATABASES = {
     }
 }
 
+LOG_LEVEL = env.str("DJANGO_LOG_LEVEL", "WARNING")
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
     "formatters": {"verbose": {"format": "%(asctime)s %(levelname)s %(module)s: %(message)s"}},
     "handlers": {
         "file": {
-            "level": "DEBUG",
+            "level": LOG_LEVEL,
             "class": "logging.FileHandler",
             "filename": os.path.join(LOG_ROOT, "application.log"),
             "formatter": "verbose",
         },
         "console": {
-            "level": "DEBUG",
+            "level": LOG_LEVEL,
             "class": "logging.StreamHandler",
             "formatter": "verbose",
         },
     },
-    "loggers": {"application": {"handlers": [LOG_HANDLER], "level": "DEBUG", "propagate": True}},
+    "root": {"handlers": ["console"], "level": LOG_LEVEL},
+    "loggers": {
+        "application": {
+            "handlers": [LOG_HANDLER],
+            "level": LOG_LEVEL,
+            "propagate": True,
+        }
+    },
 }
 
 # link to core_api app
 CORE_API_HOST = env.str("CORE_API_HOST")
 CORE_API_PORT = env.str("CORE_API_PORT")
+
+# Email
+EMAIL_BACKEND_TYPE = env.str("EMAIL_BACKEND_TYPE")
+FROM_EMAIL = env.str("FROM_EMAIL")
+CONTACT_EMAIL = env.str("CONTACT_EMAIL")
+
+if EMAIL_BACKEND_TYPE == "FILE":
+    EMAIL_BACKEND = "django.core.mail.backends.filebased.EmailBackend"
+    EMAIL_FILE_PATH = env.str("EMAIL_FILE_PATH")
+elif EMAIL_BACKEND_TYPE == "CONSOLE":
+    EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+elif EMAIL_BACKEND_TYPE == "GOVUKNOTIFY":
+    EMAIL_BACKEND = "django_gov_notify.backends.NotifyEmailBackend"
+    GOVUK_NOTIFY_API_KEY = env.str("GOVUK_NOTIFY_API_KEY")
+    GOVUK_NOTIFY_PLAIN_EMAIL_TEMPLATE_ID = env.str("GOVUK_NOTIFY_PLAIN_EMAIL_TEMPLATE_ID")
+else:
+    raise Exception(f"Unknown EMAIL_BACKEND_TYPE of {EMAIL_BACKEND_TYPE}")
+
+# Magic link
+
+MAGIC_LINK = {
+    # link expiry, in seconds
+    "DEFAULT_EXPIRY": 300,
+    # default link redirect
+    "DEFAULT_REDIRECT": "/",
+    # the preferred authorization backend to use, in the case where you have more
+    # than one specified in the `settings.AUTHORIZATION_BACKENDS` setting.
+    "AUTHENTICATION_BACKEND": "django.contrib.auth.backends.ModelBackend",
+    # SESSION_COOKIE_AGE override for magic-link logins - in seconds (default is 1 week)
+    "SESSION_EXPIRY": 7 * 24 * 60 * 60,
+}
+
+USE_STREAMING = env.bool("USE_STREAMING")
+FILE_EXPIRY_IN_SECONDS = env.int("FILE_EXPIRY_IN_DAYS") * 24 * 60 * 60

@@ -1,12 +1,12 @@
-version: '3.7'
 services:
   django-app:
     image: django-app:latest
     build:
       context: .
-      dockerfile: ./django_app/docker/web/Dockerfile
+      dockerfile: ./django_app/Dockerfile
     depends_on:
       - db
+      - minio
     networks:
       - redbox-app-network
     env_file:
@@ -32,36 +32,23 @@ services:
       - utils
     volumes:
       - ./:/app/:z
-  mlflow:
+  # mlflow:
+  #   image: mlflow_server
+  #   build:
+  #     context: .
+  #     dockerfile: ./mlflow/Dockerfile
+  #     args:
+  #     - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+  #   env_file:
+  #     - .env
+  #   ports:
+  #     - 5010:5010
+  #     - 5020:5020
+  worker:
+    image: redbox-worker:latest
     build:
       context: .
-      dockerfile: ./mlflow/docker/Dockerfile
-    image: mlflow_server
-    ports:
-        - "5010:5010"
-    volumes:
-      - mlflow-data:/mlflow
-  embedder:
-    image: redbox-embedder:latest
-    build:
-      context: .
-      dockerfile: embedder/Dockerfile
-      args:
-        - EMBEDDING_MODEL=${EMBEDDING_MODEL:-}
-    ports:
-      - 5000:5000
-    env_file:
-      - .env
-    depends_on:
-      - redis
-    networks:
-      - redbox-app-network
-    restart: unless-stopped
-  ingester:
-    image: redbox-ingester:latest
-    build:
-      context: .
-      dockerfile: ingester/Dockerfile
+      dockerfile: worker/Dockerfile
       args:
         - EMBEDDING_MODEL=${EMBEDDING_MODEL:-}
     env_file:
@@ -154,18 +141,6 @@ services:
       - .env
     networks:
       - redbox-app-network
-  # frontend-proto:
-  #   image: redbox-frontend-proto:latest
-  #   build:
-  #     context: ./frontend/prototypes/
-  #     dockerfile: Dockerfile
-  #   env_file:
-  #     - .env
-  #   ports:
-  #     - 3000:3000
-  #   networks:
-  #     - redbox-app-network
-  #   restart: unless-stopped
 
 networks:
   redbox-app-network:

@@ -1,28 +1,54 @@
-from typing import Optional
+from typing import Literal, Optional
+from uuid import UUID
 
-from langchain.chains.base import Chain
-from langchain.schema import AIMessage, HumanMessage, SystemMessage
-from pydantic import field_serializer
-
-from redbox.models.base import PersistableModel
+from pydantic import BaseModel, Field
 
 
-class ChatMessage(PersistableModel):
-    # langchain.chains.base.Chain needs pydantic v1, breaks
-    # https://python.langchain.com/docs/guides/pydantic_compatibility
-    chain: Optional[object] = None
-    message: object
+class ChatMessage(BaseModel):
+    text: str = Field(description="The text of the message")
+    role: Literal["user", "ai", "system"] = Field(description="The role of the message")
 
-    @field_serializer("chain")
-    def serialise_chain(self, chain: Chain, _info):
-        if isinstance(chain, Chain):
-            return chain.dict()
-        else:
-            return chain
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {"text": "You are helpful AI Assistant", "role": "system"},
+                {"text": "Hello", "role": "user"},
+                {"text": "Hi there!", "role": "ai"},
+            ]
+        }
+    }
 
-    @field_serializer("message")
-    def serialise_message(self, message: AIMessage | HumanMessage | SystemMessage, _info):
-        if isinstance(message, (AIMessage, HumanMessage, SystemMessage)):
-            return message.dict()
-        else:
-            return message
+
+class ChatRequest(BaseModel):
+    message_history: list[ChatMessage] = Field(description="The history of messages in the chat")
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "message_history": [
+                        {"text": "You are a helpful AI Assistant", "role": "system"},
+                        {"text": "What is AI?", "role": "user"},
+                    ]
+                }
+            ]
+        }
+    }
+
+
+class SourceDocument(BaseModel):
+    page_content: str = Field(description="chunk text")
+    file_uuid: UUID = Field(description="uuid of original file")
+    page_numbers: Optional[list[int]] = Field(
+        description="page number of the file that this chunk came from", default=None
+    )
+
+
+class ChatResponse(BaseModel):
+    source_documents: Optional[list[SourceDocument]] = Field(
+        description="documents retrieved to form this response", default=None
+    )
+    output_text: str = Field(
+        description="response text",
+        examples=["The current Prime Minister of the UK is The Rt Hon. Rishi Sunak MP."],
+    )
