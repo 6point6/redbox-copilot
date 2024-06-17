@@ -34,16 +34,22 @@ chat_app = FastAPI(
     version="0.1.0",
     openapi_tags=[
         {"name": "chat", "description": "Chat interactions with LLM and RAG backend"},
-        {"name": "embedding", "description": "Embedding interactions with SentenceTransformer"},
+        {
+            "name": "embedding",
+            "description": "Embedding interactions with SentenceTransformer",
+        },
         {"name": "llm", "description": "LLM information and parameters"},
     ],
     docs_url="/docs",
     redoc_url="/redoc",
     openapi_url="/openapi.json",
+    # rag_url="/rag",  # add
 )
 
 log.info("Loading embedding model from environment: %s", env.embedding_model)
-embedding_model = SentenceTransformerEmbeddings(model_name=env.embedding_model, cache_folder=MODEL_PATH)
+embedding_model = SentenceTransformerEmbeddings(
+    model_name=env.embedding_model, cache_folder=MODEL_PATH
+)
 log.info("Loaded embedding model from environment: %s", env.embedding_model)
 
 
@@ -74,7 +80,9 @@ if env.elastic.subscription_level == "basic":
 elif env.elastic.subscription_level in ["platinum", "enterprise"]:
     strategy = ApproxRetrievalStrategy(hybrid=True)
 else:
-    raise ValueError(f"Unknown Elastic subscription level {env.elastic.subscription_level}")
+    raise ValueError(
+        f"Unknown Elastic subscription level {env.elastic.subscription_level}"
+    )
 
 
 vector_store = ElasticsearchStore(
@@ -87,7 +95,9 @@ vector_store = ElasticsearchStore(
 
 
 @chat_app.post("/vanilla", tags=["chat"], response_model=ChatResponse)
-def simple_chat(chat_request: ChatRequest, _user_uuid: Annotated[UUID, Depends(get_user_uuid)]) -> ChatResponse:
+def simple_chat(
+    chat_request: ChatRequest, _user_uuid: Annotated[UUID, Depends(get_user_uuid)]
+) -> ChatResponse:
     """Get a LLM response to a question history"""
 
     if len(chat_request.message_history) < 2:
@@ -108,7 +118,9 @@ def simple_chat(chat_request: ChatRequest, _user_uuid: Annotated[UUID, Depends(g
             detail="The final entry in the chat history should be a user question",
         )
 
-    chat_prompt = ChatPromptTemplate.from_messages((msg.role, msg.text) for msg in chat_request.message_history)
+    chat_prompt = ChatPromptTemplate.from_messages(
+        (msg.role, msg.text) for msg in chat_request.message_history
+    )
     # Convert to LangChain style messages
     messages = chat_prompt.format_messages()
 
@@ -118,7 +130,9 @@ def simple_chat(chat_request: ChatRequest, _user_uuid: Annotated[UUID, Depends(g
 
 
 @chat_app.post("/rag", tags=["chat"])
-def rag_chat(chat_request: ChatRequest, user_uuid: Annotated[UUID, Depends(get_user_uuid)]) -> ChatResponse:
+def rag_chat(
+    chat_request: ChatRequest, user_uuid: Annotated[UUID, Depends(get_user_uuid)]
+) -> ChatResponse:
     """Get a LLM response to a question history and file
 
     Args:
@@ -143,10 +157,14 @@ def rag_chat(chat_request: ChatRequest, user_uuid: Annotated[UUID, Depends(get_u
 
     condense_question_chain = LLMChain(llm=llm, prompt=CONDENSE_QUESTION_PROMPT)
 
-    standalone_question = condense_question_chain({"question": question, "chat_history": previous_history})["text"]
+    standalone_question = condense_question_chain(
+        {"question": question, "chat_history": previous_history}
+    )["text"]
 
     docs = vector_store.as_retriever(
-        search_kwargs={"filter": {"term": {"creator_user_uuid.keyword": str(user_uuid)}}}
+        search_kwargs={
+            "filter": {"term": {"creator_user_uuid.keyword": str(user_uuid)}}
+        }
     ).get_relevant_documents(standalone_question)
 
     result = docs_with_sources_chain(
@@ -164,4 +182,6 @@ def rag_chat(chat_request: ChatRequest, user_uuid: Annotated[UUID, Depends(get_u
         )
         for langchain_document in result.get("input_documents", [])
     ]
-    return ChatResponse(output_text=result["output_text"], source_documents=source_documents)
+    return ChatResponse(
+        output_text=result["output_text"], source_documents=source_documents
+    )

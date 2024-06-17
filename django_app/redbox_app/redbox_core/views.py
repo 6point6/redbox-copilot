@@ -1,7 +1,7 @@
 import logging
 import os
 import uuid
-
+import environ
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import FieldError, ValidationError
@@ -22,6 +22,49 @@ from redbox_app.redbox_core.models import (
 )
 from requests.exceptions import HTTPError
 from yarl import URL
+from langchain_core.prompts import ChatPromptTemplate
+from langchain.chains.qa_with_sources import load_qa_with_sources_chain
+from langchain_community.chat_models import ChatLiteLLM
+from redbox.llm.prompts.chat import (
+    CONDENSE_QUESTION_PROMPT,
+    STUFF_DOCUMENT_PROMPT,
+    WITH_SOURCES_PROMPT,
+)
+from langchain.chains.llm import LLMChain
+from langchain_elasticsearch import ApproxRetrievalStrategy, ElasticsearchStore
+from redbox.model_db import MODEL_PATH
+from langchain_community.embeddings import SentenceTransformerEmbeddings
+from redbox.models.chat import ChatMessage, ChatRequest, ChatResponse, SourceDocument
+
+env = environ.Env()
+CHATMODEL = env.str("CHATMODEL")
+llm = ChatLiteLLM(
+    model="gpt-3.5-turbo",
+    streaming=True,
+)
+
+
+es = env.elasticsearch_client()
+if env.elastic.subscription_level == "basic":
+    strategy = ApproxRetrievalStrategy(hybrid=False)
+elif env.elastic.subscription_level in ["platinum", "enterprise"]:
+    strategy = ApproxRetrievalStrategy(hybrid=True)
+else:
+    raise ValueError(
+        f"Unknown Elastic subscription level {env.elastic.subscription_level}"
+    )
+embedding_model = SentenceTransformerEmbeddings(
+    model_name=env.embedding_model, cache_folder=MODEL_PATH
+)
+
+
+vector_store = ElasticsearchStore(
+    es_connection=es,
+    index_name="redbox-data-chunk",
+    embedding=embedding_model,
+    strategy=strategy,
+    vector_query_field="embedding",
+)
 
 logger = logging.getLogger(__name__)
 core_api = CoreApiClient(host=settings.CORE_API_HOST, port=settings.CORE_API_PORT)
@@ -131,7 +174,9 @@ def ingest_file(uploaded_file: UploadedFile, user: User) -> list[str]:
         )
         file.save()
     except (ValueError, FieldError, ValidationError) as e:
-        logger.error("Error creating File model object for %s.", uploaded_file, exc_info=e)
+        logger.error(
+            "Error creating File model object for %s.", uploaded_file, exc_info=e
+        )
         errors.append(e.args[0])
     else:
         try:
@@ -166,13 +211,20 @@ def remove_doc_view(request, doc_id: uuid):
     return render(
         request,
         template_name="remove-doc.html",
-        context={"request": request, "doc_id": doc_id, "doc_name": file.name, "errors": errors},
+        context={
+            "request": request,
+            "doc_id": doc_id,
+            "doc_name": file.name,
+            "errors": errors,
+        },
     )
 
 
 @login_required
 def sessions_view(request: HttpRequest, session_id: uuid = None):
-    chat_history = ChatHistory.objects.filter(users=request.user).order_by("-created_at")
+    chat_history = ChatHistory.objects.filter(users=request.user).order_by(
+        "-created_at"
+    )
 
     messages = []
     if session_id:
@@ -205,7 +257,9 @@ def post_message(request: HttpRequest) -> HttpResponse:
         session.save()
 
     # save user message
-    chat_message = ChatMessage(chat_history=session, text=message_text, role=ChatRoleEnum.user)
+    chat_message = ChatMessage(
+        chat_history=session, text=message_text, role=ChatRoleEnum.user
+    )
     chat_message.save()
 
     # get LLM response
@@ -213,14 +267,69 @@ def post_message(request: HttpRequest) -> HttpResponse:
         {"role": message.role, "text": message.text}
         for message in ChatMessage.objects.all().filter(chat_history=session)
     ]
-    response_data = core_api.rag_chat(message_history, request.user)
+    if CHATMODEL == "6p6backend":
+        question = message_history[-1].text
+        previous_history = list(message_history[:-1])
+        previous_history = ChatPromptTemplate.from_messages(
+            (msg.role, msg.text) for msg in previous_history
+        ).format_messages()
 
-    llm_message = ChatMessage(chat_history=session, text=response_data.output_text, role=ChatRoleEnum.ai)
+        docs_with_sources_chain = load_qa_with_sources_chain(
+            llm,
+            chain_type="stuff",
+            prompt=WITH_SOURCES_PROMPT,
+            document_prompt=STUFF_DOCUMENT_PROMPT,
+            verbose=True,
+        )
+
+        condense_question_chain = LLMChain(llm=llm, prompt=CONDENSE_QUESTION_PROMPT)
+
+        standalone_question = condense_question_chain(
+            {"question": question, "chat_history": previous_history}
+        )["text"]
+
+        docs = vector_store.as_retriever(
+            search_kwargs={
+                "filter": {"term": {"creator_user_uuid.keyword": request.user}}
+            }
+        ).get_relevant_documents(standalone_question)
+
+        result = docs_with_sources_chain(
+            {
+                "question": standalone_question,
+                "input_documents": docs,
+            },
+        )
+
+        source_documents = [
+            SourceDocument(
+                page_content=langchain_document.page_content,
+                file_uuid=langchain_document.metadata.get("parent_doc_uuid"),
+                page_numbers=langchain_document.metadata.get("page_numbers"),
+            )
+            for langchain_document in result.get("input_documents", [])
+        ]
+        return ChatResponse(
+            output_text=result["output_text"], source_documents=source_documents
+        )
+
+        # output_text = "testing"
+    else:
+        response_data = core_api.rag_chat(message_history, request.user)
+        output_text = response_data.output_text
+
+    llm_message = ChatMessage(
+        chat_history=session, text=output_text, role=ChatRoleEnum.ai
+    )
     llm_message.save()
-
-    doc_uuids: list[str] = [doc.file_uuid for doc in response_data.source_documents]
-    files: list[File] = File.objects.filter(core_file_uuid__in=doc_uuids, user=request.user)
-    llm_message.source_files.set(files)
+    if CHATMODEL == "6p6backend":
+        files = "WPA_policy_document.pdf"
+    else:
+        doc_uuids: list[str] = [doc.file_uuid for doc in response_data.source_documents]
+        files: list[File] = File.objects.filter(
+            core_file_uuid__in=doc_uuids, user=request.user
+        )
+        llm_message.source_files.set(files)
 
     return redirect(reverse(sessions_view, args=(session.id,)))
 
@@ -235,12 +344,22 @@ def file_status_api_view(request: HttpRequest) -> JsonResponse:
     try:
         file = File.objects.get(pk=file_id)
     except File.DoesNotExist as ex:
-        logger.error("File object information not found in django - file does not exist %s.", file_id, exc_info=ex)
+        logger.error(
+            "File object information not found in django - file does not exist %s.",
+            file_id,
+            exc_info=ex,
+        )
         return JsonResponse({"status": ProcessingStatusEnum.unknown.label})
     try:
-        core_file_status_response = core_api.get_file_status(file_id=file.core_file_uuid, user=request.user)
+        core_file_status_response = core_api.get_file_status(
+            file_id=file.core_file_uuid, user=request.user
+        )
     except HTTPError as ex:
-        logger.error("File object information from core not found - file does not exist %s.", file_id, exc_info=ex)
+        logger.error(
+            "File object information from core not found - file does not exist %s.",
+            file_id,
+            exc_info=ex,
+        )
         if not file.processing_status:
             file.processing_status = ProcessingStatusEnum.unknown.label
             file.save()

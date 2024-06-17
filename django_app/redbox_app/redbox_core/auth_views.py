@@ -15,11 +15,11 @@ def get_or_create_user(email: str) -> Optional[models.User]:
     try:
         return models.User.objects.get(email=email)
     except models.User.DoesNotExist:
-        if email.endswith("@cabinetoffice.gov.uk"):
-            logger.debug("creating user with email %s", email)
-            return models.User.objects.create(email=email)
-        else:
-            logger.debug("User with email %s not found", email)
+        # if email.endswith("@cabinetoffice.gov.uk"):
+        logger.debug("creating user with email %s", email)
+        return models.User.objects.create(email=email)
+        # else:
+        #   logger.debug("User with email %s not found", email)
     return None
 
 
@@ -30,11 +30,13 @@ def sign_in_view(request: HttpRequest):
         form = SignInForm(request.POST)
         if form.is_valid():
             email = form.cleaned_data["email"].lower()
+            logger.info(f"received email {email}")
 
             if user := get_or_create_user(email):
                 link = MagicLink.objects.create(user=user, redirect_to="/")
                 full_link = request.build_absolute_uri(link.get_absolute_url())
-
+                logger.info(f"send link {full_link}")
+                print(f"send link {full_link}")
                 # Email link to user
                 email_handler.send_magic_link_email(full_link, email)
 
@@ -56,6 +58,7 @@ def sign_in_view(request: HttpRequest):
 
 
 def sign_in_link_sent_view(request: HttpRequest):
+    # request.user.is_authenticated = True
     if request.user.is_authenticated:
         return redirect("homepage")
     return render(
