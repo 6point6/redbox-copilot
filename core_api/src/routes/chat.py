@@ -1,4 +1,5 @@
 import logging
+from math import e
 from typing import Annotated
 from uuid import UUID
 
@@ -6,6 +7,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from langchain.chains.llm import LLMChain
 from langchain.chains.qa_with_sources import load_qa_with_sources_chain
 from langchain_community.chat_models import ChatLiteLLM
+from langchain.chat_models import ChatOpenAI
 from langchain_community.embeddings import SentenceTransformerEmbeddings
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_elasticsearch import ApproxRetrievalStrategy, ElasticsearchStore
@@ -19,6 +21,7 @@ from redbox.llm.prompts.chat import (
 from redbox.model_db import MODEL_PATH
 from redbox.models import EmbeddingModelInfo, Settings
 from redbox.models.chat import ChatMessage, ChatRequest, ChatResponse, SourceDocument
+
 
 # === Logging ===
 
@@ -65,14 +68,35 @@ def populate_embedding_model_info() -> EmbeddingModelInfo:
 
 embedding_model_info = populate_embedding_model_info()
 
-
+# env = environ.Env()
+# CHATMODEL = env.str("CHATMODEL")
 # === LLM setup ===
+host = "127.0.0.1"
+model_port = "6000"
 
+# CHATMODEL = "6p6backend"
+if env.CHATMODEL == "6p6backend":
+    log.info("using %s model", env.CHATMODEL)
+    llm = ChatLiteLLM(
+        model="gpt-3.5-turbo",
+        openai_api_base=f"http://{host}:{model_port}/v1",
+        streaming=True,
+    )
+else:
+    log.info("using OpenAI model")
+    llm = ChatLiteLLM(
+        model="gpt-3.5-turbo",
+        streaming=True,
+    )
 
-llm = ChatLiteLLM(
-    model="gpt-3.5-turbo",
-    streaming=True,
-)
+# host = "localhost"
+# host = "127.0.0.1"
+# model_port = "6000"
+# llm = ChatOpenAI(
+#    model="gpt-3.5-turbo",
+#    openai_api_base=f"http://{host}:{model_port}/v1",
+#    streaming=True,
+# )
 
 es = env.elasticsearch_client()
 if env.elastic.subscription_level == "basic":
