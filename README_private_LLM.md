@@ -1,4 +1,9 @@
-Tricks to run the Redbox in MAC (e.g. the one we use in Civil Servants Expo)
+How to run the Redbox  (e.g. the MACwe use in Civil Servants Expo)
+
+Note: Make sure yo use the correct .env file under the top directory.
+The .env file can be found in confluence
+
+
 Open Visual Code
 
 Run the docker:
